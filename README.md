@@ -1,176 +1,133 @@
-# Backup si restore pentru discul unui VM
+# debian-rescue-tools
 
-Scriptul `diskimager.sh` creeaza o imagine comprimata a intregului disc al
-unui VM si o poate restaura ulterior. Este gandit pentru rulare ca `root`
-dintr-un mediu rescue/live, cu destinatia aflata pe un NAS montat prin NFS.
+A minimal Debian 13 (trixie) rescue live ISO, plus a growing collection of
+rescue/recovery tools that ship inside it.
 
-E deja instalat in imaginea de rescue la `/opt/diskimager/diskimager.sh`,
-cu symlink la `diskimager` (fara `.sh`) - se ruleaza direct din orice
-director, ca root.
+The ISO itself is deliberately kept small: SSH, WireGuard, NFS, and a
+handful of disk-recovery utilities. Anything heavier (a task-specific tool,
+a script) lives under `tools/` and gets baked into the image automatically
+by the build script.
 
-> **Atentie:** operatia `--restore` suprascrie integral discul selectat.
-> Verifica de fiecare data discul tinta si arhiva selectata.
+Sorry for Romanian messages... english messages will be implemented soon.
 
-## Ce salveaza
+## Repository layout
 
-Este citit intregul block device (implicit interactiv, sau `--disk /dev/X`),
-nu doar o partitie. Astfel, imaginea include tabela de partitii, bootloaderul
-si toate sistemele de fisiere. Fluxul este comprimat cu `zstd`, verificat dupa
-scriere si insotit de checksum SHA-256, un fisier `.meta` (dimensiunea exacta
-a discului sursa) si un log.
+```
+debian-rescue-iso-build.sh       - builds the ISO (run this)
+rescue-config/
+  packages.list                  - one Debian package per line
+  wireguard/wg0.conf.example     - template; real file is gitignored
+  ssh/
+    authorized_keys.example      - template; real file is gitignored
+    sshd_config.d/*.conf         - sshd drop-ins, the source of truth for SSH config
+  sysctl.d/*.conf                - custom sysctl settings
+  shell/aliases.sh               - shell aliases loaded at login
+tools/
+  <name>/<name>.sh               - each folder becomes /opt/<name>/ in the
+                                    image, with a symlink at
+                                    /usr/local/bin/<name> (no .sh)
+  diskimager/                    - block-level backup/restore tool
+```
 
-## Utilizare
+Anything under `tools/` follows the same convention: a folder named `foo`
+must contain a `foo.sh` entry point. The build script picks it up
+automatically — no changes needed anywhere else.
+
+## Configure
+
+1. **Packages** — edit `rescue-config/packages.list`, one package per line.
+   Comments (`#`) and blank lines are ignored.
+
+2. **WireGuard** — copy the template and fill in your real values:
+   ```bash
+   cp rescue-config/wireguard/wg0.conf.example rescue-config/wireguard/wg0.conf
+   ```
+   This file is **required** — the build refuses to run without it. It's
+   gitignored on purpose: it contains a private key and must never be
+   committed to this (public) repository.
+
+3. **SSH access** — root is the only user in this rescue environment.
+   - `rescue-config/ssh/sshd_config.d/00-rescue.config` is the source of
+     truth for sshd behavior (both key and password login are allowed by
+     default).
+   - Optionally add your public key:
+     ```bash
+     cp rescue-config/ssh/authorized_keys.example rescue-config/ssh/authorized_keys
+     # then paste your real public key into it
+     ```
+     Also gitignored — never commit a real key here either.
+
+4. **sysctl / shell aliases** — `rescue-config/sysctl.d/` and
+   `rescue-config/shell/aliases.sh` are optional and applied as-is.
+
+5. **Root password** — open `debian-rescue-iso-build.sh` and set
+   `ROOT_PASSWORD` near the top. The script refuses to run while it's left
+   at the default placeholder.
+
+## Build
+
+Run as root, on a Debian machine with internet access (the mirrors, not
+this repo, are what actually needs the network):
+
+```bash
+chmod +x debian-rescue-iso-build.sh
+./debian-rescue-iso-build.sh
+```
+
+This installs `live-build` and its dependencies, configures a hybrid
+BIOS+UEFI image for `amd64`/trixie, and produces
+`live-image-amd64.hybrid.iso` in the repo root. A full build takes roughly
+10-20 minutes depending on link speed.
+
+Write it to a USB stick:
+
+```bash
+dd if=live-image-amd64.hybrid.iso of=/dev/sdX bs=4M status=progress conv=fsync
+```
+
+### What the image does at boot
+
+- Boots to the "Live system" entry automatically after 15 seconds (hybrid
+  BIOS/UEFI boot menu).
+- Brings up networking via DHCP on any wired interface.
+- Connects the WireGuard tunnel automatically (`wg-quick@wg0`).
+- Starts SSH automatically; root login is allowed (key or password).
+- Auto-logs in to a root shell on the local console (tty1) as well.
+
+## Tools
+
+Every tool under `tools/` ships inside the ISO at `/opt/<name>/`, with a
+plain `<name>` command available system-wide (symlinked into
+`/usr/local/bin`, no `.sh` needed).
+
+### diskimager
+
+Block-level backup/restore for an entire disk (partition table, bootloader,
+everything), compressed with `zstd`, verified with SHA-256, destination on
+an NFS share reached over the WireGuard tunnel.
 
 ```bash
 diskimager --backup
 diskimager --restore
 ```
 
-Fara `--disk`, scriptul iti arata discurile disponibile (excluzand orice
-disc/partitie deja montata - de exemplu mediul rescue de pe care ai bootat)
-si te lasa sa alegi interactiv dintr-un meniu numerotat.
+Without `--disk`, it lists the disks currently visible on the machine and
+lets you pick interactively — handy since the same physical disk can show
+up as `/dev/vda`, `/dev/sda`, etc. depending on the hypervisor/host. On
+restore, only disks large enough for the selected archive are shown
+(exact source size is recorded in a `.meta` file at backup time).
 
-La `--restore`, lista de discuri afisate e filtrata automat: apar doar cele
-cel putin la fel de mari ca discul sursa original (citit din fisierul
-`.meta` al arhivei). Daca niciun disc disponibil nu e suficient de mare,
-scriptul iti spune clar acest lucru si se opreste - trebuie sa maresti
-discul din panoul hostingului/hypervisorului inainte sa reincerci.
+Flags: `--disk /dev/sdX`, `--machine NAME`, `--mountpoint /path`.
 
-Optiuni disponibile:
+More tools will be added under `tools/` over time (a SMART-check helper is
+one likely candidate) — each with its own short usage note either inline
+here or in its own `tools/<name>/README.md` as the list grows.
 
-```
---disk /dev/sdX      sare peste selectia interactiva
---machine NUME        (implicit: vps8)
---mountpoint /cale     (implicit: /mnt/_thc_bkp)
-```
+## Security notes
 
-## 1. Pornirea in rescue mode
-
-Porneste VM-ul in rescue mode din panoul de control al hostingului si
-conecteaza-te prin SSH.
-
-## 2. Acces WireGuard catre reteaua NAS-ului
-
-Configul WireGuard e deja copt in imagine (din `rescue-config/wireguard/`
-la momentul build-ului ISO-ului) si tunelul porneste automat la boot.
-Verifica rapid:
-
-```bash
-wg show
-ip route
-ping -c 3 <IP_NAS>
-```
-
-## 3. Montarea share-ului NFS
-
-Exemplu, presupunand ca NAS-ul are IP-ul privat `10.0.0.11`:
-
-```bash
-mkdir -p /mnt/_thc_bkp
-mount -t nfs -o rw,hard,proto=tcp,timeo=600,retrans=2 \
-  10.0.0.11:/CALEA_EXPORTULUI /mnt/_thc_bkp
-```
-
-Verifica atent ca mount-ul este activ si ca exista suficient spatiu:
-
-```bash
-findmnt /mnt/_thc_bkp
-df -h /mnt/_thc_bkp
-```
-
-## 4. Backup in tmux
-
-`tmux` permite continuarea backup-ului dupa inchiderea conexiunii SSH:
-
-```bash
-tmux new -s backup
-diskimager --backup --machine vps8
-```
-
-Alege discul din meniu (sau da `--disk /dev/vda` direct daca il stii deja).
-
-Dupa ce transferul a inceput, apasa `Ctrl+B`, elibereaza tastele, apoi apasa
-`D`. Poti inchide sesiunea SSH. La reconectare: `tmux attach -t backup`.
-
-Un backup complet produce:
-
-- `*.img.zst` - imaginea comprimata
-- `*.img.zst.sha256` - checksum-ul
-- `*.img.zst.meta` - dimensiunea exacta a discului sursa (folosita la restore)
-- `*.backup.log` - logul operatiei
-
-Un fisier `*.partial` indica un transfer intrerupt/esuat si nu trebuie
-folosit pentru restore.
-
-## 5. Restore
-
-```bash
-tmux new -s restore
-diskimager --restore
-```
-
-Alegi arhiva, apoi discul tinta (doar cele suficient de mari sunt afisate).
-Scriptul ii verifica integritatea si checksum-ul, afiseaza discul tinta si
-cere confirmarea exacta `YES` inainte de suprascriere.
-
-Dupa restore:
-
-```bash
-lsblk -f /dev/vda
-sync
-```
-
-## Discul tinta e mai mare decat cel original - ce se intampla?
-
-De exemplu: sursa era pe un disc de 160 GiB, iar VM-ul nou are un disc de
-256 GiB. Restore-ul scrie doar cati octeti avea discul original - restul de
-~96 GiB ramane neutilizat la finalul discului, exact cum era si inainte,
-netusiat de restore. Scriptul iti si spune explicit cati GiB raman liberi.
-
-Ca sa folosesti acel spatiu (de exemplu pentru a extinde un LVM), pasii sunt
-manuali si depind de ce ai pe disc:
-
-1. **Daca discul foloseste GPT** (probabil, pe majoritatea VM-urilor moderne):
-   dupa restore pe un disc mai mare, structura GPT "crede" in continuare ca
-   discul are dimensiunea veche - are nevoie sa fie "reparata" ca sa vada
-   spatiul nou:
-   ```bash
-   parted /dev/vda print
-   # parted detecteaza singur discrepanta si ofera sa repare/mute
-   # header-ul GPT de backup la finalul real al discului - accepta (Fix)
-   ```
-   Sau, echivalent, cu `sgdisk`:
-   ```bash
-   sgdisk -e /dev/vda
-   ```
-
-2. **Extinde ultima partitie** ca sa umple spatiul nou:
-   ```bash
-   parted /dev/vda resizepart <NUMAR_PARTITIE> 100%
-   ```
-
-3. **Daca ultima partitie e un LVM physical volume**, spune-i lui LVM ca
-   PV-ul are acum mai mult spatiu:
-   ```bash
-   pvresize /dev/vda<NUMAR_PARTITIE>
-   lvextend -l +100%FREE /dev/<vg>/<lv>
-   resize2fs /dev/<vg>/<lv>      # pentru ext4
-   # sau: xfs_growfs /punct/montare   # pentru xfs
-   ```
-
-4. **Daca nu e LVM**, ci un filesystem direct pe partitie, sare peste pasul
-   de LVM si mergi direct la `resize2fs`/`xfs_growfs` dupa pasul 2.
-
-Toate astea se fac dupa ce ai pornit sistemul restaurat (sau tot din rescue,
-daca preferi) - nu fac parte din `diskimager` momentan, tocmai pentru ca
-depind de layout-ul exact al discului (LVM sau nu, ext4 sau xfs etc.) si o
-automatizare oarba aici ar fi mai riscanta decat utila.
-
-## Observatii
-
-- Imaginea comprimata poate ramane apropiata de marimea discului daca datele
-  nu sunt compresibile.
-- `conv=noerror,sync` permite backup-ului sa continue la erori de citire,
-  pastrand alinierea. Orice eroare trebuie investigata in log.
-- Nu monta sistemele de fisiere de pe discul sursa in timpul backup-ului.
-- Nu expune serviciul NFS direct pe internet.
+- `rescue-config/wireguard/wg0.conf` and `rescue-config/ssh/authorized_keys`
+  are gitignored. Never force-add or commit the real versions — this repo
+  is public.
+- `diskimager --restore` is destructive by design: it overwrites the
+  entire target disk. It requires typing `YES` to confirm, and refuses to
+  run against a disk (or any of its partitions) that's currently mounted.
