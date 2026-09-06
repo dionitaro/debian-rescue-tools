@@ -131,3 +131,16 @@ here or in its own `tools/<name>/README.md` as the list grows.
 - `diskimager --restore` is destructive by design: it overwrites the
   entire target disk. It requires typing `YES` to confirm, and refuses to
   run against a disk (or any of its partitions) that's currently mounted.
+
+## License
+
+The original scripts, configuration templates, and documentation in this
+repository are licensed under the [MIT License](LICENSE).
+
+Debian and other third-party software included in a generated ISO retain
+their own licenses. The MIT License does not relicense those components;
+redistributing an ISO requires complying with their respective license
+terms, including any applicable source-code and notice requirements.
+
+These tools are provided without warranty. Disk restore operations overwrite
+data; verify the target disk and keep independent backups before use.
