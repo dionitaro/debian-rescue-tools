@@ -1,0 +1,21 @@
+# Un pachet pe linie. Liniile goale si comentariile (#) sunt ignorate.
+
+openssh-server
+sudo
+tmux
+curl
+wget
+rsync
+wireguard-tools
+systemd-resolved
+nfs-common
+nfs-kernel-server
+disktype
+parted
+gddrescue
+testdisk
+tree
+mc
+
+# necesar pentru tools/diskimager (comprimare arhive .img.zst)
+zstd

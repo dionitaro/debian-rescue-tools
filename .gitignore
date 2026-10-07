@@ -1,0 +1,3 @@
+# Configuri reale - NU se comit niciodata (chei private / date sensibile)
+/rescue-config/wireguard/wg0.conf
+/rescue-config/ssh/authorized_keys

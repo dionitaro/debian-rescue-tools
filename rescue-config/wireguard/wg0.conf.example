@@ -1,0 +1,10 @@
+[Interface]
+PrivateKey = <CHEIA_PRIVATA_A_CLIENTULUI>
+Address = <IP_WG_CLIENT>/24
+
+[Peer]
+PublicKey = <CHEIA_PUBLICA_A_SERVERULUI>
+PresharedKey = <OPTIONAL_PRESHARED_KEY>
+Endpoint = <IP_SAU_DNS_WG_SERVER>:51820
+AllowedIPs = <IP_SUPPORT_NETWORK>/24, <IP_WIREGUARD_NETWORK>/24
+PersistentKeepalive = 25
